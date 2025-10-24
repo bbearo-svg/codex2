@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum FulfillmentType {
+  DELIVERY
+  PICKUP
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  role          Role     @default(CUSTOMER)
+  name          String?
+  email         String   @unique
+  passwordHash  String?
+  phone         String?
+  company       String?
+  createdAt     DateTime @default(now())
+  addresses     Address[]
+  carts         Cart[]
+  orders        Order[]
+  stripeCustomerId String?
+}
+
+model Address {
+  id       String  @id @default(cuid())
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  line1    String
+  line2    String?
+  city     String
+  state    String
+  zip      String
+  isDefault Boolean @default(false)
+}
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  sort        Int     @default(0)
+  items       Item[]
+  leadTimeDays Int    @default(2)
+  dailyCapacity Int?  @default(100)
+}
+
+model Item {
+  id           String   @id @default(cuid())
+  category     Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId   String
+  name         String
+  description  String?
+  basePrice    Decimal  @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  imageUrl     String?
+  leadTimeDays Int      @default(2)
+  modifiers    Modifier[]
+  orderItems   OrderItem[]
+  cartItems    CartItem[]
+}
+
+model Modifier {
+  id       String  @id @default(cuid())
+  item     Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId   String
+  name     String
+  min      Int     @default(0)
+  max      Int     @default(1)
+  sort     Int     @default(0)
+  options  ModifierOption[]
+}
+
+model ModifierOption {
+  id          String   @id @default(cuid())
+  modifier    Modifier @relation(fields: [modifierId], references: [id], onDelete: Cascade)
+  modifierId  String
+  name        String
+  priceDelta  Decimal  @db.Decimal(10, 2) @default(0)
+  sort        Int      @default(0)
+  isDefault   Boolean  @default(false)
+}
+
+model Discount {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  type        DiscountType
+  value       Decimal      @db.Decimal(10, 2)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  minSubtotal Decimal?     @db.Decimal(10, 2)
+  active      Boolean      @default(true)
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  user      User?      @relation(fields: [userId], references: [id])
+  userId    String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+  stripePaymentIntentId String?
+}
+
+model CartItem {
+  id        String     @id @default(cuid())
+  cart      Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cartId    String
+  item      Item       @relation(fields: [itemId], references: [id])
+  itemId    String
+  quantity  Int        @default(1)
+  notes     String?
+  unitPrice Decimal    @db.Decimal(10, 2)
+  total     Decimal    @db.Decimal(10, 2)
+  options   CartItemOption[]
+
+  @@unique([cartId, itemId])
+}
+
+model CartItemOption {
+  id               String           @id @default(cuid())
+  cartItem         CartItem         @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  cartItemId       String
+  modifierOption   ModifierOption   @relation(fields: [modifierOptionId], references: [id])
+  modifierOptionId String
+  priceDelta       Decimal          @db.Decimal(10, 2) @default(0)
+}
+
+model Order {
+  id                    String        @id @default(cuid())
+  user                  User?         @relation(fields: [userId], references: [id])
+  userId                String?
+  number                String        @unique
+  status                OrderStatus   @default(PENDING)
+  subtotal              Decimal       @db.Decimal(10, 2)
+  tax                   Decimal       @db.Decimal(10, 2)
+  deliveryFee           Decimal       @db.Decimal(10, 2)
+  discountTotal         Decimal       @db.Decimal(10, 2) @default(0)
+  tip                   Decimal       @db.Decimal(10, 2) @default(0)
+  total                 Decimal       @db.Decimal(10, 2)
+  fulfillment           FulfillmentType
+  eventAt               DateTime
+  notes                 String?
+  deliveryLine1         String?
+  deliveryLine2         String?
+  deliveryCity          String?
+  deliveryState         String?
+  deliveryZip           String?
+  discountCode          String?
+  stripePaymentIntentId String        @unique
+  invoiceUrl            String?
+  createdAt             DateTime      @default(now())
+  items                 OrderItem[]
+}
+
+model OrderItem {
+  id           String      @id @default(cuid())
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  item         Item?       @relation(fields: [itemId], references: [id])
+  itemId       String?
+  nameSnapshot String
+  quantity     Int         @default(1)
+  unitPrice    Decimal     @db.Decimal(10, 2)
+  total        Decimal     @db.Decimal(10, 2)
+  options      OrderItemOption[]
+}
+
+model OrderItemOption {
+  id           String @id @default(cuid())
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItemId  String
+  nameSnapshot String
+  priceDelta   Decimal @db.Decimal(10, 2) @default(0)
+}
+
+model WebhookEvent {
+  id        String   @id @default(cuid())
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+}
+
+model BlackoutDate {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  reason    String?
+}
+
+model CapacityReservation {
+  id         String   @id @default(cuid())
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String
+  eventAt    DateTime
+  quantity   Int
+  orderId    String?
+}
+
+model StoreSetting {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  value         String
+  updatedAt     DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
